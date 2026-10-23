@@ -264,7 +264,7 @@ static const struct roccat_button_mapping roccat_button_mapping[] = {
 	{ 34, BUTTON_ACTION_KEY(KEY_NEXTSONG) },
 	{ 35, BUTTON_ACTION_KEY(KEY_PLAYPAUSE) },
 	{ 36, BUTTON_ACTION_KEY(KEY_STOPCD) },
-	{ 37, BUTTON_ACTION_KEY(KEY_MUTE) },
+	/* Firmware code 37 (mute) is broken, so mute is not mapped */
 	{ 38, BUTTON_ACTION_KEY(KEY_VOLUMEUP) },
 	{ 39, BUTTON_ACTION_KEY(KEY_VOLUMEDOWN) },
 	{ 48, BUTTON_ACTION_MACRO },
@@ -917,6 +917,14 @@ roccat_write_profile(struct ratbag_profile *profile)
 	report->report_data_length = ROCCAT_REPORT_SIZE_SETTINGS;
 	report->report_rate = roccat_report_rate_to_index(profile->hz);
 
+	/* Byte 4 of the settings report is a bitmask of which DPI slots (0-4)
+	 * are enabled for firmware-side resolution cycling (the resolution-cycle
+	 * buttons on the mouse). Verified against ROCCAT Swarm captures: 0x06
+	 * enables slots 1-2, 0x0e enables slots 1-3, 0x1f enables all five.
+	 * Always expose all five slots so the cycle buttons walk through every
+	 * configured DPI stage. */
+	report->x_y_linked = 0x1f;
+
 	ratbag_profile_for_each_resolution(profile, resolution) {
 		/* Clamp DPI to valid range; firmware misbehaves with zero. */
 		unsigned int dpi_x = CLAMP(resolution->dpi_x, ROCCAT_MIN_DPI, ROCCAT_MAX_DPI);
@@ -967,8 +975,13 @@ roccat_write_profile(struct ratbag_profile *profile)
 		slot->modifiers = 0;
 
 		if (button->action.type == RATBAG_BUTTON_ACTION_TYPE_KEY) {
-			/* A plain key action (piper "send keystroke") is encoded as
-			 * ROCCAT_BUTTON_SHORTCUT with no modifier flags. */
+			/* Known multimedia keys use the firmware's native code,
+			 * which roccat_button_action_to_raw() already set above */
+			if (slot->keycode != 0)
+				continue;
+
+			/* Any other key is encoded as ROCCAT_BUTTON_SHORTCUT
+			 * with no modifier flags. */
 			uint8_t hid_usage = ratbag_hidraw_get_keyboard_usage_from_keycode(device, button->action.action.key);
 			if (hid_usage) {
 				slot->keycode   = ROCCAT_BUTTON_SHORTCUT;
